@@ -2,20 +2,18 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const connectDB = require("./config/db");
 
 const User = require("./models/userSchema");
 const Attendance = require("./models/attendanceSchema");
 const AuditLog = require("./models/auditLogSchema");
 
+connectDB();
+
 const app = express();
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || "key_is_secret";
-
-mongoose
-    .connect("mongodb://localhost:27017/attendance_system")
-    .then(() => console.log("MongoDB connected"))
-    .catch((err) => console.log("MongoDB connection error", err));
 
 const auth = (req, res, next) => {
     const authHeader = req.headers.authorization;
