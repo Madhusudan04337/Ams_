@@ -1,18 +1,19 @@
 const express = require("express");
+const cors = require('cors');
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const connectDB = require("./config/db");
-
-const User = require("./models/userSchema");
+const { connectDB } = require("./config/db");
+const dotenv = require("dotenv");
+dotenv.config(); const User = require("./models/userSchema");
 const Attendance = require("./models/attendanceSchema");
 const AuditLog = require("./models/auditLogSchema");
 
-connectDB();
-
 const app = express();
+app.use(cors());
 app.use(express.json());
 
+connectDB();
 const JWT_SECRET = process.env.JWT_SECRET || "key_is_secret";
 
 const auth = (req, res, next) => {
@@ -58,16 +59,23 @@ app.get("/", (req, res) => {
 
 app.post("/register", async (req, res) => {
     try {
-        const { username, email, password, role } = req.body;
-        if (await User.findOne({ email })) {
+        const { username, email, password, role, managerId } = req.body;
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
             return res.status(400).json({ message: "This user already exists." });
         }
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ username, email, password: hashedPassword, role });
+        const newUser = new User({
+            username,
+            email,
+            password: hashedPassword,
+            role,
+            managerId: role === "employee" ? managerId : null
+        });
         await newUser.save();
-        res.status(201).json({ message: "New user created." });
+        res.status(201).json({ message: "New user created successfully.", user: newUser });
     } catch (err) {
-        res.status(500).json({ message: "Could not create user." });
+        res.status(500).json({ message: "Could not create user.", error: err.message });
     }
 });
 
@@ -144,45 +152,109 @@ app.get("/attendance/history", auth, roleAuth(["employee"]), async (req, res) =>
 app.get('/attendance/:userId', auth, roleAuth(['admin', 'manager']), async (req, res) => {
     try {
         const { userId } = req.params;
+
         if (req.user.role === "manager") {
             const targetUser = await User.findById(userId).select("managerId");
-            if (!targetUser || String(targetUser.managerId) !== String(req.user.id)) {
-                return res.status(403).json({ message: "You can only see your team's attendance." });
+            if (!targetUser || String(targetUser.managerId) !== String(req.user._id)) {
+                return res.status(403).json({ 
+                    message: "Forbidden. You can only see your team's attendance.",
+                    data: {
+                        employeeManagerId: targetUser ? targetUser.managerId : null,
+                        yourId: req.user._id
+                    }
+                });
             }
         }
+
         const records = await Attendance.find({ user: userId }).sort({ date: -1 });
-        res.json({ attendance: records });
+        res.status(200).json({ attendance: records });
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: "Server error.", error: error.message });
     }
 });
 
+
 app.put('/attendance/:attendanceId', auth, roleAuth(['admin', 'manager']), async (req, res) => {
+    console.log('--- Attendance Update Request Received ---');
+    console.log(`User Role: ${req.user.role}, User ID: ${req.user.id}`);
+    console.log(`Request Params: ${JSON.stringify(req.params)}`);
+    console.log(`Request Body: ${JSON.stringify(req.body)}`);
+
     try {
         const { attendanceId } = req.params;
         const { newStatus } = req.body;
+
+        const VALID_STATUSES = ['Present', 'Absent', 'On Leave', 'Half Day', 'Holiday'];
+        if (!newStatus || !VALID_STATUSES.includes(newStatus)) {
+            console.log(`Validation Failed: Invalid status '${newStatus}'`);
+            return res.status(400).json({
+                message: "Invalid or missing 'newStatus'.",
+                error: `Status must be one of: ${VALID_STATUSES.join(', ')}`
+            });
+        }
+
+        console.log(`Searching for attendance record with ID: ${attendanceId}`);
         const record = await Attendance.findById(attendanceId);
         if (!record) {
+            console.log('Record Not Found.');
             return res.status(404).json({ message: "Attendance record not found." });
         }
+        console.log(`Record found successfully for user: ${record.user}`);
+
         if (req.user.role === "manager") {
+            console.log('Executing manager-specific authorization...');
             const targetUser = await User.findById(record.user).select("managerId");
-            if (!targetUser || String(targetUser.managerId) !== String(req.user.id)) {
-                return res.status(403).json({ message: "You can only change your team's attendance." });
+
+            if (!targetUser) {
+                console.log(`Manager Check Failed: The user associated with this attendance record (ID: ${record.user}) does not exist.`);
+                return res.status(404).json({ message: "User for this attendance record not found." });
             }
+
+            if (!targetUser.managerId || !targetUser.managerId.equals(req.user.id)) {
+                console.log(`Manager Check Failed: Target user's manager ID (${targetUser.managerId}) does not match logged-in manager ID (${req.user.id}).`);
+                return res.status(403).json({
+                    message: "Forbidden. You can only change attendance for users you directly manage.",
+                    reason: "The employee's assigned manager ID does not match your user ID.",
+                    data: {
+                        employeeManagerId: targetUser.managerId ? targetUser.managerId.toString() : 'Not Assigned',
+                        yourId: req.user.id
+                    }
+                });
+            }
+            console.log('Manager authorization successful.');
         }
+
         const previousStatus = record.status;
         record.status = newStatus;
         record.rectifiedBy = req.user.id;
+
+        console.log(`Updating record. Old status: '${previousStatus}', New status: '${newStatus}'. Rectified by: ${req.user.id}`);
         await record.save();
-        await AuditLog.create({ action: "update", performedBy: req.user.id, targetUser: record.user, attendanceDate: record.date, previousStatus, newStatus });
-        res.json({ message: "Attendance updated.", record });
+        console.log('Attendance record saved.');
+
+        await AuditLog.create({
+            attendanceId: record._id,
+            action: "rectified",
+            changedBy: req.user.id,
+            oldStatus: previousStatus,
+            newStatus: newStatus
+        });
+        console.log('Audit log created successfully.');
+
+        res.status(200).json({ message: "Attendance updated successfully.", record });
+
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        console.error('--- An unexpected error occurred ---');
+        console.error('Error Name:', error.name);
+        console.error('Error Message:', error.message);
+        console.error('Error Stack:', error.stack);
+        res.status(500).json({ message: "An unexpected server error occurred.", error: error.message });
     }
 });
 
-const PORT = process.env.PORT || 4000;
+
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is listening at port ${PORT}`);
 });

@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Link, useNavigate } from 'react-router-dom';
-import 'bootstrap/dist/css/bootstrap.min.css';
+// import 'bootstrap/dist/css/bootstrap.min.css';
 
-const Login = ({ setToken }) => {
+const Register = () => {
     const navigate = useNavigate();
     const [formData, setFormData] = useState({
         username: '',
-        password: ''
+        email: '',
+        password: '',
+        role: 'employee'
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
-    const { username, password } = formData;
+    const { username, email, password, role } = formData;
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -24,22 +26,16 @@ const Login = ({ setToken }) => {
         setSuccess('');
 
         try {
-            const res = await axios.post('http://localhost:4000/login', formData);
-            const receivedToken = res.data.token;
-
-            localStorage.setItem('token', receivedToken);
-            setToken(receivedToken);
-            setSuccess('Login successful! Redirecting...');
-
+            const res = await axios.post('http://localhost:3000/register', formData);
+            setSuccess(res.data.message);
             setTimeout(() => {
-                navigate('/myprofile');
-            }, 1000);
-
+                navigate('/login');
+            }, 1500);
         } catch (err) {
             if (err.response && err.response.data.message) {
                 setError(err.response.data.message);
             } else {
-                setError('Login failed. Please try again.');
+                setError('Registration failed. Please try again.');
             }
         }
     };
@@ -50,14 +46,19 @@ const Login = ({ setToken }) => {
                 <div className='col-11 col-md-8 col-lg-6'>
                     <div className='card'>
                         <div className='card-body'>
-                            <h2 className='card-title text-center mb-4'>Login</h2>
+                            <h2 className='card-title text-center mb-4'>Register</h2>
                             <form onSubmit={handleSubmit}>
                                 {error && <div className="alert alert-danger">{error}</div>}
                                 {success && <div className="alert alert-success">{success}</div>}
-
+                                
                                 <div className='mb-3'>
                                     <label htmlFor='username' className='form-label'>Username</label>
                                     <input type="text" className='form-control' id="username" name="username" value={username} onChange={handleChange} required />
+                                </div>
+
+                                <div className='mb-3'>
+                                    <label htmlFor='email' className='form-label'>Email</label>
+                                    <input type="email" className='form-control' id="email" name="email" value={email} onChange={handleChange} required />
                                 </div>
 
                                 <div className='mb-3'>
@@ -65,12 +66,21 @@ const Login = ({ setToken }) => {
                                     <input type="password" className='form-control' id="password" name="password" value={password} onChange={handleChange} required />
                                 </div>
 
-                                <button type='submit' className='btn btn-primary w-100'>
-                                    Login
-                                </button>
+                                <div className='mb-3'>
+                                    <label htmlFor='role' className='form-label'>Role</label>
+                                    <select className='form-select' id='role' name='role' value={role} onChange={handleChange}>
+                                        <option value='employee'>Employee</option>
+                                        <option value='manager'>Manager</option>
+                                        <option value='admin'>Admin</option>
+                                    </select>
+                                </div>
 
-                                <p className='mt-3 text-center'>
-                                    Don't have an account? <Link to="/register">Register</Link>
+                                <button type='submit' className='btn btn-primary w-100'>
+                                    Register
+                                </button>
+                                
+                                <p className="mt-3 text-center">
+                                    Already have an account? <Link to="/login">Login</Link>
                                 </p>
                             </form>
                         </div>
@@ -81,4 +91,4 @@ const Login = ({ setToken }) => {
     );
 }
 
-export default Login;
+export default Register;

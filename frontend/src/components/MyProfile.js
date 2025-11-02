@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import 'bootstrap/dist/css/bootstrap.min.css';
+// import 'bootstrap/dist/css/bootstrap.min.css';
 
 const MyProfile = () => {
     const [profile, setProfile] = useState(null);
@@ -15,7 +15,7 @@ const MyProfile = () => {
                     return;
                 }
 
-                const res = await axios.get('http://localhost:4000/myprofile', {
+                const res = await axios.get('http://localhost:3000/myprofile', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 
